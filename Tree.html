@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Merry Chirstmas ^-^</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #050510; 
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            color: white;
+            font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
+        }
+
+        canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+            display: block;
+        }
+ #ui-container {
+            position: absolute;
+            bottom: 60px;
+            width: 100%;
+            display: flex;
+            justify-content: center;
+            z-index: 10;
+            pointer-events: none;
+        }
+
+        .glass-btn {
+            background: rgba(20, 30, 60, 0.4);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 50px;
+            padding: 14px 48px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3), 
+                        0 0 15px rgba(255, 215, 0, 0.2);
+            pointer-events: auto;
+            transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+            outline: none;
+            color: #fff;
+            font-size: 18px;
+            font-weight: 600;
+            letter-spacing: 1.5px;
+            cursor: pointer;
+            text-transform: uppercase;
+            user-select: none;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .glass-btn::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+            transition: 0.5s;
+        }
+
+        .glass-btn:hover {
+            background: rgba(50, 30, 80, 0.6);
+            border-color: rgba(255, 215, 0, 0.6);
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5), 
+                        0 0 30px rgba(255, 215, 0, 0.5);
+            transform: translateY(-2px) scale(1.05);
+            letter-spacing: 2px;
+        }
+
+        .glass-btn:hover::before {
+            left: 100%;
+        }
+        
+        .glass-btn:active {
+            transform: translateY(2px) scale(0.98);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+        }
+        
+    </style>
+</head>
+<body>
+
+<!-- 交互UI层 -->
+<div id="ui-container">
+    <button id="dropGiftBtn" class="glass-btn">Klick to Drop a Gift 🎁</button>
+</div>
+
+<canvas id="canvas"></canvas>
+
+<script>
+    // --- 初始化设置 ---
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const btnEl = document.getElementById('dropGiftBtn');
+
+    let WIDTH = window.innerWidth;
+    let HEIGHT = window.innerHeight;
+
+    canvas.width = WIDTH;
+    canvas.height = HEIGHT;
+
+    window.addEventListener('resize', () => {
+        WIDTH = window.innerWidth;
+        HEIGHT = window.innerHeight;
+        canvas.width = WIDTH;
+        canvas.height = HEIGHT;
+    });
+
+    // --- 配色方案 ---
+    const COLORS = {
+        BG: '#050510',
+        LEAF_BASE: { r: 10, g: 40, b: 80 },
+        LEAF_HIGHLIGHT: { r: 100, g: 200, b: 180 },
+        STAR: {r: 240, g: 250, b: 255, str: 'rgb(240, 250, 255)'},
+        LIGHT_PINK: {r: 255, g: 50, b: 120},
+        LIGHT_ORANGE: {r: 255, g: 160, b: 50},
+        LIGHT_CYAN: {r: 50, g: 255, b: 255},
+        RIBBON: {r: 255, g: 240, b: 180}
+    };
+
+    // --- 核心类：3D 点 ---
+    class Point3D {
+        constructor(x, y, z, color, size, type = "leaf") {
+            this.x = x;
+            this.y = y;
+            this.z = z;
+            this.base_x = x;
+            this.base_z = z;
+            this.color = color; 
+            this.size = size;
+            this.type = type; 
+            this.blink_offset = Math.random() * 100;
+            
+            if (type === 'ribbon') {
+                this.ribbonRadius = Math.sqrt(x*x + z*z);
+                this.ribbonAngle = Math.atan2(z, x);
+                this.ribbonSpeed = 0.05;
+                this.ribbonStrandOffset = Math.floor(Math.random() * 3) * (Math.PI * 2 / 3);
+            }
+        }
+
+        project(angle, fov = 300, viewer_distance = 400) {
+            if (this.type === 'ribbon') {
+                this.y -= 1.5; 
+                this.ribbonAngle += this.ribbonSpeed;
+                let currentAngle = this.ribbonAngle + (this.y * 0.01) + this.ribbonStrandOffset;
+                this.base_x = Math.cos(currentAngle) * this.ribbonRadius;
+                this.base_z = Math.sin(currentAngle) * this.ribbonRadius;
+                if (this.y < -320) {
+                    this.y = 320;
+                    this.ribbonAngle = Math.random() * Math.PI * 2;
+                }
+            }
+
+            const cos_a = Math.cos(angle);
+            const sin_a = Math.sin(angle);
+
+            let rot_x = this.base_x * cos_a - this.base_z * sin_a;
+            let rot_z = this.base_x * sin_a + this.base_z * cos_a + this.z;
+
+            if (this.type !== "snow" && this.type !== "gift" && this.type !== "ribbon") {
+                rot_z = this.base_x * sin_a + this.base_z * cos_a;
+            }
+
+            const depth = viewer_distance + rot_z;
+            if (depth < 1) return null;
+
+            const scale = fov / depth;
+            const x_2d = rot_x * scale + WIDTH / 2;
+            const y_2d = this.y * scale + HEIGHT / 2 - 25; 
+
+            return { x: x_2d, y: y_2d, scale: scale, z_depth: rot_z };
+        }
+    }
+
+    // --- 礼物类 ---
+    class Gift extends Point3D {
+        constructor(targetX, targetZ, color) {
+            super(0, -600, 0, color, 40, "gift");
+            
+            this.targetX = targetX;
+            this.targetZ = targetZ;
+            this.targetY = 300 + Math.random() * 5; 
+            
+            this.velocity = { x: 0, y: 15, z: 0 };
+            this.landed = false;
+            
+            this.rotation = Math.random() * Math.PI;
+            this.rotationSpeed = (Math.random() - 0.5) * 0.2;
+        }
+
+        update() {
+            if (!this.landed) {
+                this.velocity.y += 0.4; 
+                this.y += this.velocity.y;
+                
+                this.base_x += (this.targetX - this.base_x) * 0.06;
+                this.base_z += (this.targetZ - this.base_z) * 0.06;
+
+                this.rotation += this.rotationSpeed;
+
+                if (this.y >= this.targetY) {
+                    this.y = this.targetY;
+                    this.base_x = this.targetX;
+                    this.base_z = this.targetZ;
+                    this.landed = true;
+                    this.velocity = {x:0, y:0, z:0};
+                }
+            }
+        }
+    }
+
+    // --- 生成修长的圣诞树 ---
+    const particles = [];
+
+    const layers = 130; 
+    for (let i = 0; i < layers; i++) {
+        let y = -320 + i * 4.5; 
+        let radius = i * 1.9; 
+        let count = Math.floor(radius * 2.2) + 10; 
+
+        for (let j = 0; j < count; j++) {
+            let angle = (j / count) * Math.PI * 2 + (i * 0.25);
+            let r_random = radius * (0.8 + Math.random() * 0.4); 
+
+            let px = Math.cos(angle) * r_random;
+            let pz = Math.sin(angle) * r_random;
+
+            let ratio = i / layers;
+            let r = COLORS.LEAF_BASE.r + (COLORS.LEAF_HIGHLIGHT.r - COLORS.LEAF_BASE.r) * ratio;
+            let g = COLORS.LEAF_BASE.g + (COLORS.LEAF_HIGHLIGHT.g - COLORS.LEAF_BASE.g) * ratio;
+            let b = COLORS.LEAF_BASE.b + (COLORS.LEAF_HIGHLIGHT.b - COLORS.LEAF_BASE.b) * ratio;
+            
+            let c_var = Math.floor(Math.random() * 40);
+            let color = { r: r, g: g + c_var, b: b + c_var }; 
+
+            let p_type = "leaf";
+            let size = 2;
+
+            if (Math.random() < 0.05) {
+                p_type = "light";
+                size = 3.5;
+                const choices = [COLORS.LIGHT_PINK, COLORS.LIGHT_ORANGE, COLORS.LIGHT_CYAN];
+                color = choices[Math.floor(Math.random() * choices.length)];
+            }
+
+            particles.push(new Point3D(px, y, pz, color, size, p_type));
+        }
+    }
+
+    // 2. 生成顶部星星
+    for (let i = 0; i < 80; i++) {
+        let x = (Math.random() - 0.5) * 30;
+        let y = -340 + (Math.random() - 0.5) * 30;
+        let z = (Math.random() - 0.5) * 30;
+        particles.push(new Point3D(x, y, z, COLORS.STAR, 3.5, "star"));
+    }
+
+    // --- 生成背景雪花 ---
+    const snowflakes = [];
+    for (let i = 0; i < 280; i++) { 
+        let x = (Math.random() - 0.5) * 1200;
+        let y = (Math.random() - 0.5) * 1000;
+        let z = (Math.random() - 0.5) * 600;
+        snowflakes.push(new Point3D(x, y, z, COLORS.STAR, Math.random() * 2.5 + 1, "snow"));
+    }
+
+    // --- 生成星光丝光带 ---
+    const ribbonParticles = [];
+    const strands = 3; 
+    const particlesPerStrand = 100;
+    
+    for (let s = 0; s < strands; s++) {
+        for (let i = 0; i < particlesPerStrand; i++) {
+            let y = -320 + (i * (640 / particlesPerStrand));
+            let radius = 140 + Math.random() * 20; 
+            let angle = (i * 0.1) + (s * (Math.PI * 2 / strands));
+            
+            let x = Math.cos(angle) * radius;
+            let z = Math.sin(angle) * radius;
+            
+            let size = Math.random() * 2 + 1.5;
+            
+            ribbonParticles.push(new Point3D(x, y, z, COLORS.RIBBON, size, "ribbon"));
+        }
+    }
+
+    // --- 礼物系统 ---
+    const fallingGifts = [];
+    const giftColors = [
+        {r: 220, g: 40, b: 60},   
+        {r: 255, g: 200, b: 0},   
+        {r: 60, g: 100, b: 240},  
+        {r: 40, g: 180, b: 80}    
+    ];
+
+    btnEl.addEventListener('click', () => {
+        let angle = Math.random() * Math.PI * 2;
+        let radius = 200 + Math.random() * 250; 
+        let tx = Math.cos(angle) * radius;
+        let tz = Math.sin(angle) * radius;
+        
+        let color = giftColors[Math.floor(Math.random() * giftColors.length)];
+        fallingGifts.push(new Gift(tx, tz, color));
+    });
+
+    // --- 动画循环 ---
+    let angle = 0;
+    let time = 0;
+
+    function animate() {
+        ctx.fillStyle = COLORS.BG;
+        ctx.fillRect(0, 0, WIDTH, HEIGHT);
+
+        angle += 0.008; 
+        time += 1;
+
+        // --- 已移除雪地基座绘制逻辑 ---
+
+        let to_draw = [];
+        const allSources = [particles, snowflakes, ribbonParticles, fallingGifts];
+
+        for (let source of allSources) {
+            for (let p of source) {
+                if (p instanceof Gift) {
+                    p.update();
+                }
+
+                if (p.type === 'snow') {
+                    p.y += 1.2;
+                    p.base_x += Math.sin(time * 0.01 + p.blink_offset) * 0.3;
+                    if (p.y > 400) {
+                        p.y = -400;
+                        p.x = (Math.random() - 0.5) * 1200;
+                        p.base_x = p.x;
+                    }
+                }
+                
+                const proj = p.project(angle);
+                if (proj) {
+                    to_draw.push({ z: proj.z_depth, p: p, x: proj.x, y: proj.y, scale: proj.scale });
+                }
+            }
+        }
+
+        to_draw.sort((a, b) => b.z - a.z);
+
+        for (let item of to_draw) {
+            const { p, x, y, scale } = item;
+            const size = Math.max(0.5, p.size * scale);
+
+            if (p.type === "leaf") {
+                let depthFactor = scale * 0.9;
+                if (depthFactor < 0.1) continue;
+                
+                ctx.fillStyle = `rgb(${p.color.r * depthFactor}, ${p.color.g * depthFactor}, ${p.color.b * depthFactor})`;
+                ctx.beginPath();
+                ctx.arc(x, y, size, 0, Math.PI * 2);
+                ctx.fill();
+
+            } else if (p.type === "light") {
+                let blink = Math.sin(time * 0.05 + p.blink_offset);
+                if (blink > -0.5) {
+                    ctx.save();
+                    ctx.globalCompositeOperation = 'lighter';
+                    let alpha = Math.max(0.5, (blink + 1) / 2);
+
+                    ctx.fillStyle = `rgba(${p.color.r}, ${p.color.g}, ${p.color.b}, ${alpha})`;
+                    ctx.beginPath();
+                    ctx.arc(x, y, size, 0, Math.PI * 2);
+                    ctx.fill();
+
+                    if (alpha > 0.7) {
+                        ctx.fillStyle = `rgba(${p.color.r}, ${p.color.g}, ${p.color.b}, 0.25)`;
+                        ctx.beginPath();
+                        ctx.arc(x, y, size * 2.5, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                    ctx.restore();
+                }
+
+            } else if (p.type === "star") {
+                ctx.save();
+                ctx.globalCompositeOperation = 'lighter';
+                let pulse = 1 + Math.sin(time * 0.1) * 0.3;
+                ctx.fillStyle = COLORS.STAR.str;
+                ctx.beginPath();
+                ctx.arc(x, y, (size + 2) * pulse, 0, Math.PI * 2);
+                ctx.fill();
+                
+                let glowSize = size * 5 * pulse;
+                let gradient = ctx.createRadialGradient(x, y, size, x, y, glowSize);
+                gradient.addColorStop(0, `rgba(${COLORS.STAR.r}, ${COLORS.STAR.g}, ${COLORS.STAR.b}, 0.9)`);
+                gradient.addColorStop(1, `rgba(${COLORS.STAR.r}, ${COLORS.STAR.g}, ${COLORS.STAR.b}, 0)`);
+                ctx.fillStyle = gradient;
+                ctx.beginPath();
+                ctx.arc(x, y, glowSize, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+
+            } else if (p.type === "snow") {
+                let alpha = Math.min(1, scale * 0.8);
+                ctx.fillStyle = `rgba(240, 250, 255, ${alpha})`;
+                ctx.beginPath();
+                ctx.arc(x, y, size, 0, Math.PI * 2);
+                ctx.fill();
+
+            } else if (p.type === "ribbon") {
+                ctx.save();
+                ctx.globalCompositeOperation = 'lighter';
+                let alpha = 0.6 + Math.sin(time * 0.1 + p.blink_offset) * 0.4;
+                
+                ctx.fillStyle = `rgba(${p.color.r}, ${p.color.g}, ${p.color.b}, ${alpha})`;
+                ctx.beginPath();
+                ctx.arc(x, y, size, 0, Math.PI * 2);
+                ctx.fill();
+                
+                ctx.fillStyle = `rgba(${p.color.r}, ${p.color.g}, ${p.color.b}, 0.3)`;
+                ctx.beginPath();
+                ctx.arc(x, y, size * 2, 0, Math.PI * 2);
+                ctx.fill();
+
+                ctx.restore();
+
+            } else if (p.type === "gift") {
+                ctx.save();
+                
+                // 阴影绘制逻辑保留，但在深色背景上几乎不可见，仅作为深度参考
+                let groundY = 300;
+                let s_cos_a = Math.cos(angle);
+                let s_sin_a = Math.sin(angle);
+                let s_rot_x = p.base_x * s_cos_a - p.base_z * s_sin_a;
+                let s_rot_z = p.base_x * s_sin_a + p.base_z * s_cos_a;
+                let s_depth = 400 + s_rot_z;
+                let s_scale = 300 / s_depth;
+                let s_sx = s_rot_x * s_scale + WIDTH / 2;
+                let s_sy = groundY * s_scale + HEIGHT / 2 + 120;
+                
+                let shadowHeight = (300 - p.y);
+                let shadowAlpha = Math.max(0, 0.6 - shadowHeight * 0.002);
+                let shadowSize = size * (1 - shadowHeight * 0.001);
+
+                if (shadowAlpha > 0) {
+                    ctx.fillStyle = `rgba(0, 0, 0, ${shadowAlpha})`;
+                    ctx.beginPath();
+                    ctx.ellipse(s_sx, s_sy, shadowSize, shadowSize * 0.4, 0, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+
+                // 礼物盒
+                ctx.translate(x, y);
+                ctx.rotate(p.rotation);
+
+                let boxSize = size;
+
+                let boxGrad = ctx.createLinearGradient(-boxSize/2, -boxSize/2, boxSize/2, boxSize/2);
+                boxGrad.addColorStop(0, `rgb(${p.color.r + 40}, ${p.color.g + 40}, ${p.color.b + 40})`);
+                boxGrad.addColorStop(1, `rgb(${p.color.r - 40}, ${p.color.g - 40}, ${p.color.b - 40})`);
+                
+                ctx.fillStyle = boxGrad;
+                ctx.fillRect(-boxSize/2, -boxSize/2, boxSize, boxSize);
+                
+                ctx.strokeStyle = `rgba(0,0,0,0.2)`;
+                ctx.lineWidth = 2;
+                ctx.strokeRect(-boxSize/2, -boxSize/2, boxSize, boxSize);
+
+                ctx.fillStyle = "rgba(255, 240, 200, 0.9)";
+                ctx.fillRect(-boxSize/5, -boxSize/2, boxSize/2.5, boxSize);
+                ctx.fillRect(-boxSize/2, -boxSize/5, boxSize, boxSize/2.5);
+
+                let bowSize = boxSize / 3;
+                ctx.beginPath();
+                ctx.arc(0, 0, bowSize, 0, Math.PI*2);
+                ctx.fillStyle = "rgba(255, 230, 150, 0.9)";
+                ctx.fill();
+
+                ctx.restore();
+            }
+        }
+
+        requestAnimationFrame(animate);
+    }
+
+    animate();
+
+</script>
+</body>
+</html>
